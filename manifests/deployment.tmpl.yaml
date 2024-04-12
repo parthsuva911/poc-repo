@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask
+  labels:
+    app: flask
+spec:
+  replicas: 2
+  strategy: 
+    type: RollingUpdate
+  progressDeadlineSeconds: 120
+  selector:
+    matchLabels:
+      app: flask
+  template:
+    metadata:
+      labels:
+        app: flask
+    spec:
+      containers:
+        - name: flask
+          image: ${ECR_REPOSITORY}:${IMAGE_TAG}
+          ports:
+            - containerPort: 9090
+          resources:
+            limits:
+              cpu: 250m
+              memory: 250Mi
+          livenessProbe:
+            httpGet:
+              path: /liveness
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /readiness
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 3
