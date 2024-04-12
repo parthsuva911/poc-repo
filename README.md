@@ -3,6 +3,8 @@
  
 This document provides an overview of the architecture for deploying a Dockerized application to an Amazon EKS cluster using GitHub Actions for CI/CD.
  
+![architecture](https://github.com/parthsuva911/poc-repo/assets/36154055/655e7dce-4eaf-4bb7-abd8-1a56ca406149)
+
 ## Architecture Components
  
 ### GitHub Repository
