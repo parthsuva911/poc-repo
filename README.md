@@ -8,8 +8,8 @@ This document provides an overview of the architecture for deploying a Dockerize
 ## Architecture Components
  
 ### GitHub Repository
-- Contains two branches: `development` and `production`.
-- Represents different versions of the application for both development and production environments.
+- Contains two branches: `develop` and `production`.
+- Represents different versions of the application for both develop and production environments.
  
 ### Amazon ECR Repository
 - Manages Docker container images for the application.
@@ -29,7 +29,7 @@ This document provides an overview of the architecture for deploying a Dockerize
  
 ### GitHub Actions Workflow
 - Automates the deployment process of the Dockerized application to the Amazon EKS cluster.
-- Triggers on both `push` and `pull_request` events for branches named `production` and `development`.
+- Triggers on both `push` and `pull_request` events for branches named `production` and `develop`.
 - Defines environment variables such as AWS region, ECR repository name, short SHA, and EKS cluster name.
  
 ### Workflow Steps
@@ -42,7 +42,7 @@ This document provides an overview of the architecture for deploying a Dockerize
 7. **Deploy**: Deploys the application to the EKS cluster. Sets environment variables for the ECR registry, branch, image tag. Defines functions for namespace existence check, deployment creation, deployment status check, and deployment rollback. Executes the main deployment process, checking namespace existence, creating deployment, waiting for deployment to complete, and rolling back if necessary.
  
 
-This workflow ensures a streamlined CI/CD process, ensuring that changes pushed to the `production` or `development` branches trigger the building, tagging, and deployment of the Docker image to the EKS cluster.
+This workflow ensures a streamlined CI/CD process, ensuring that changes pushed to the `production` or `develop` branches trigger the building, tagging, and deployment of the Docker image to the EKS cluster.
 
 ```
 poc-repo/
