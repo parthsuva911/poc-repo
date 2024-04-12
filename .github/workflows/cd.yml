@@ -1,0 +1,146 @@
+name: cd
+
+on:
+  push:
+    branches:
+      - production
+      - develop
+  pull_request:
+    branches:
+      - production
+      - develop
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: poc-ecr-repo
+  SHORT_SHA: $(echo git ls-files -s app | git hash-object --stdin | cut -c 1-8)
+  CLUSTER_NAME: poc-cluster
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Clone
+      uses: actions/checkout@v2
+
+    - name: Branch used
+      id: extract_branch
+      run: |
+        echo "${GITHUB_EVENT_NAME}"
+        if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            echo "::set-output name=branch::$(echo ${GITHUB_REF##*/})"
+        else
+            echo "::set-output name=branch::$(echo $GITHUB_BASE_REF)"
+        fi
+      shell: bash
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      run: |
+        check_ecr_image() {
+            aws ecr describe-images --repository-name=${{ env.ECR_REPOSITORY }} --image-ids imageTag=${{ env.SHORT_SHA }} > /dev/null 2>&1
+            return $?
+        }
+
+        if check_ecr_image; then
+            echo "Image with ${{ env.SHORT_SHA }} tag is already exists in registry."
+        else
+          echo "Image with ${{ env.SHORT_SHA }} tag is not exists in registry."
+          cd app
+          docker image build \
+          --tag ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.SHORT_SHA }} \
+          .
+          docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.SHORT_SHA }}
+        fi
+
+    - name: Install and configure kubectl
+      run: |
+        VERSION=$(curl --silent https://storage.googleapis.com/kubernetes-release/release/stable.txt)
+        # https://github.com/aws/aws-cli/issues/6920#issuecomment-1117981158
+        VERSION=v1.23.6
+        curl https://storage.googleapis.com/kubernetes-release/release/$VERSION/bin/linux/amd64/kubectl \
+          --progress-bar \
+          --location \
+          --remote-name
+        chmod +x kubectl
+        sudo mv kubectl /usr/local/bin/
+        echo ${{ secrets.KUBECONFIG }} | base64 --decode > kubeconfig.yaml
+
+    - name: Deploy
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        BRANCH: ${{ steps.extract_branch.outputs.branch }}
+      run: |
+        export KUBECONFIG=kubeconfig.yaml
+        export ECR_REPOSITORY=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}
+        export IMAGE_TAG=${{ env.SHORT_SHA }}
+
+        # Function to check if namespace is available
+        check_namespace() {
+            kubectl get namespace "${BRANCH}" &> /dev/null
+            return $?
+        }
+
+        # Function to create Kubernetes deployment
+        create_deployment() {
+            echo "Applying manifests."
+            envsubst < manifests/deployment.tmpl.yaml > manifests/deployment.yaml
+            rm manifests/deployment.tmpl.yaml
+            kubectl apply -f manifests/ -n "$BRANCH"
+            echo "Manifests applied."
+        }
+
+        # Function to wait for deployment to complete
+        wait_for_deployment() {
+            deployment_name="$1"
+            echo "Waiting for deployment $deployment_name to complete."
+            kubectl rollout status deployment/"$deployment_name" -n "${BRANCH}"
+            echo "Deployment $deployment_name is completed."
+            return $?
+        }
+
+        # Function to rollback deployment
+        rollback_deployment() {
+            deployment_name="$1"
+            echo "Starting rollback of deployment $deployment_name."
+            kubectl rollout undo deployment/"$deployment_name" -n "${BRANCH}"
+            echo "Rollback of deployment $deployment_name completed."
+        }
+
+        # Main function
+        main() {
+            # deployment_name=$(basename "$deployment_manifest" .yaml)
+            # deployment_name="flask"
+
+            deployment_name=$(grep -E '^\s*name:' manifests/deployment.tmpl.yaml | awk '{print $2}')
+            echo "Deployment name: $deployment_name"
+
+            if check_namespace "${BRANCH}"; then
+                echo "Namespace ${BRANCH} exists for deployment."
+                create_deployment
+                if wait_for_deployment "$deployment_name"; then
+                    echo "Deployment succeeded."
+                else
+                    echo "Deployment failed. Rolling back..."
+                    rollback_deployment "$deployment_name"
+                fi
+            else
+                echo "Namespace ${BRANCH} not available."
+            fi
+        }
+
+        main
